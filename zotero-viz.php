@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Zotero Visualizations
  * Description: Display interactive world maps and bar charts from Zotero collections
- * Version: 1.0.9
+ * Version: 1.0.10
  * Author: Daniel J. Vreeman, PT, DPT, MS, FACMI, FIAHSI
  * License: GPL v2 or later
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ZOTERO_VIZ_VERSION', '1.0.9'); // Increment this to force asset/cache refresh
+define('ZOTERO_VIZ_VERSION', '1.0.10'); // Increment this to force asset/cache refresh
 define('ZOTERO_VIZ_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ZOTERO_VIZ_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -88,24 +88,139 @@ function zotero_viz_deactivate() {
     wp_clear_scheduled_hook('zotero_viz_daily_cache_refresh');
 }
 
+function zotero_viz_default_colors() {
+    return array(
+        'highlight' => '#ff0000',
+        'default' => '#cccccc',
+        'border' => '#999999',
+        'water' => '#e6f3ff'
+    );
+}
+
+function zotero_viz_sanitize_colors($colors) {
+    $defaults = zotero_viz_default_colors();
+    if (!is_array($colors)) {
+        return $defaults;
+    }
+    $clean = $defaults;
+    foreach ($defaults as $key => $default) {
+        if (empty($colors[$key]) || !is_string($colors[$key])) {
+            continue;
+        }
+        $hex = strtoupper(trim($colors[$key]));
+        if ($hex !== '' && $hex[0] !== '#') {
+            $hex = '#' . $hex;
+        }
+        if (preg_match('/^#[0-9A-F]{6}$/', $hex)) {
+            $clean[$key] = $hex;
+        }
+    }
+    return $clean;
+}
+
 // Parse Zotero URL to extract components
 function zotero_viz_parse_url($url) {
-    // Pattern: https://www.zotero.org/groups/{group_id}/{library_name}/collections/{collection_key}
-    // or: https://www.zotero.org/groups/{group_id}/{library_name}/library
-    
-    $pattern = '/https:\/\/www\.zotero\.org\/groups\/(\d+)\/([^\/]+)\/(library|collections\/([A-Z0-9]+))/';
-    
-    if (preg_match($pattern, $url, $matches)) {
-        $result = array(
-            'group_id' => $matches[1],
-            'library_name' => $matches[2],
-            'collection_key' => isset($matches[4]) ? $matches[4] : '',
-            'url' => $url
-        );
-        
-        return $result;
+    $url = trim(wp_unslash((string) $url));
+    if ($url === '') {
+        return false;
     }
-    
+
+    if (stripos($url, 'zotero.org') !== false && !preg_match('#^https?://#i', $url)) {
+        $url = 'https://' . ltrim($url, '/');
+    }
+
+    $path = wp_parse_url($url, PHP_URL_PATH);
+    if (!is_string($path) || $path === '') {
+        return false;
+    }
+
+    $path = trim($path, '/');
+    if (!preg_match('#(?:^|/)groups/(\d+)/([^/]+)(?:/(.*))?$#i', $path, $matches)) {
+        return false;
+    }
+
+    $group_id = $matches[1];
+    $library_name = rawurldecode($matches[2]);
+    $rest = isset($matches[3]) ? $matches[3] : '';
+    $collection_key = '';
+    if (preg_match('#collections/([A-Za-z0-9]+)#i', $rest, $collection_match)) {
+        $collection_key = $collection_match[1];
+    }
+
+    $canonical = 'https://www.zotero.org/groups/' . $group_id . '/' . rawurlencode($library_name);
+    if ($collection_key !== '') {
+        $canonical .= '/collections/' . $collection_key;
+    } else {
+        $canonical .= '/library';
+    }
+
+    return array(
+        'group_id' => $group_id,
+        'library_name' => $library_name,
+        'collection_key' => $collection_key,
+        'url' => $canonical
+    );
+}
+
+function zotero_viz_normalize_collection($collection) {
+    if (!is_array($collection)) {
+        return false;
+    }
+
+    $url = isset($collection['url']) ? trim(wp_unslash($collection['url'])) : '';
+    $display_name = isset($collection['display_name']) ? sanitize_text_field(wp_unslash($collection['display_name'])) : '';
+    $library_name = isset($collection['library_name']) ? sanitize_text_field(wp_unslash($collection['library_name'])) : '';
+    $group_id = isset($collection['group_id']) ? sanitize_text_field(wp_unslash($collection['group_id'])) : '';
+    $collection_key = isset($collection['collection_key']) ? sanitize_text_field(wp_unslash($collection['collection_key'])) : '';
+
+    if ($url !== '') {
+        $parsed = zotero_viz_parse_url($url);
+        if ($parsed) {
+            if ($group_id === '') {
+                $group_id = $parsed['group_id'];
+            }
+            if ($library_name === '') {
+                $library_name = $parsed['library_name'];
+            }
+            if ($collection_key === '') {
+                $collection_key = $parsed['collection_key'];
+            }
+            $url = $parsed['url'];
+        }
+    }
+
+    if ($group_id === '' || $library_name === '') {
+        return false;
+    }
+
+    if ($display_name === '') {
+        $display_name = $library_name;
+        $display_name .= ($collection_key !== '') ? '_collection' : '_full';
+    }
+
+    if ($url === '') {
+        $url = 'https://www.zotero.org/groups/' . rawurlencode($group_id) . '/' . rawurlencode($library_name);
+        $url .= ($collection_key !== '') ? '/collections/' . rawurlencode($collection_key) : '/library';
+    }
+
+    return array(
+        'url' => $url,
+        'display_name' => $display_name,
+        'library_name' => $library_name,
+        'group_id' => $group_id,
+        'collection_key' => $collection_key
+    );
+}
+
+function zotero_viz_collection_row_has_input($collection) {
+    if (!is_array($collection)) {
+        return false;
+    }
+    foreach (array('url', 'display_name', 'library_name', 'group_id', 'collection_key') as $field) {
+        if (!empty($collection[$field])) {
+            return true;
+        }
+    }
     return false;
 }
 
@@ -143,35 +258,24 @@ function zotero_viz_admin_page() {
     // Handle form submissions
     if (isset($_POST['zotero_viz_save_settings'])) {
         $collections = array();
+        $skipped = 0;
         if (isset($_POST['collections']) && is_array($_POST['collections'])) {
             foreach ($_POST['collections'] as $collection) {
-                if (!empty($collection['url']) || (!empty($collection['library_name']) && !empty($collection['display_name']))) {
-                    // Parse URL if provided
-                    if (!empty($collection['url'])) {
-                        $parsed = zotero_viz_parse_url($collection['url']);
-                        if ($parsed) {
-                            // Add display name to parsed data
-                            $parsed['display_name'] = !empty($collection['display_name']) 
-                                ? sanitize_text_field($collection['display_name']) 
-                                : $parsed['library_name'];
-                            $collections[] = $parsed;
-                        }
-                    } else {
-                        // Use manual entry
-                        $collections[] = array(
-                            'library_name' => sanitize_text_field($collection['library_name']),
-                            'display_name' => sanitize_text_field($collection['display_name']),
-                            'group_id' => sanitize_text_field($collection['group_id']),
-                            'collection_key' => sanitize_text_field($collection['collection_key']),
-                            'url' => ''
-                        );
-                    }
+                $normalized = zotero_viz_normalize_collection($collection);
+                if ($normalized) {
+                    $collections[] = $normalized;
+                } elseif (zotero_viz_collection_row_has_input($collection)) {
+                    $skipped++;
                 }
             }
         }
         update_option('zotero_viz_collections', $collections);
-        update_option('zotero_viz_colors', $_POST['colors']);
-        echo '<div class="notice notice-success"><p>Settings saved!</p></div>';
+        $colors_in = isset($_POST['colors']) ? wp_unslash($_POST['colors']) : array();
+        update_option('zotero_viz_colors', zotero_viz_sanitize_colors($colors_in));
+        echo '<div class="notice notice-success"><p>Settings saved! ' . count($collections) . ' collection' . (count($collections) === 1 ? '' : 's') . ' stored.</p></div>';
+        if ($skipped > 0) {
+            echo '<div class="notice notice-error"><p>' . intval($skipped) . ' row(s) were not saved. Each collection needs a valid Zotero group URL, or both Group ID and Library Name.</p></div>';
+        }
     }
     
     if (isset($_POST['zotero_viz_refresh_cache'])) {
@@ -187,12 +291,10 @@ function zotero_viz_admin_page() {
     }
     
     $collections = get_option('zotero_viz_collections', array());
-    $colors = get_option('zotero_viz_colors', array(
-        'highlight' => '#ff0000',
-        'default' => '#cccccc',
-        'border' => '#999999',
-        'water' => '#e6f3ff'
-    ));
+    if (!is_array($collections)) {
+        $collections = array();
+    }
+    $colors = zotero_viz_sanitize_colors(get_option('zotero_viz_colors', array()));
     
     // Get current tab
     $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'settings';
@@ -235,8 +337,8 @@ function zotero_viz_admin_page() {
                             <tr>
                                 <td><input type="text" name="collections[<?php echo $i; ?>][url]" value="<?php echo esc_attr($collection['url'] ?? ''); ?>" placeholder="https://www.zotero.org/groups/..." /></td>
                                 <td><input type="text" name="collections[<?php echo $i; ?>][display_name]" value="<?php echo esc_attr($collection['display_name'] ?? ''); ?>" placeholder="e.g., hl_standards_full" /></td>
-                                <td><input type="text" name="collections[<?php echo $i; ?>][library_name]" value="<?php echo esc_attr($collection['library_name']); ?>" /></td>
-                                <td><input type="text" name="collections[<?php echo $i; ?>][group_id]" value="<?php echo esc_attr($collection['group_id']); ?>" /></td>
+                                <td><input type="text" name="collections[<?php echo $i; ?>][library_name]" value="<?php echo esc_attr($collection['library_name'] ?? ''); ?>" /></td>
+                                <td><input type="text" name="collections[<?php echo $i; ?>][group_id]" value="<?php echo esc_attr($collection['group_id'] ?? ''); ?>" /></td>
                                 <td><input type="text" name="collections[<?php echo $i; ?>][collection_key]" value="<?php echo esc_attr($collection['collection_key'] ?? ''); ?>" /></td>
                                 <td><button type="button" class="button remove-collection">Remove</button></td>
                             </tr>
@@ -264,32 +366,32 @@ function zotero_viz_admin_page() {
                         <tr>
                             <th>Highlight Color</th>
                             <td>
-                                <input type="color" name="colors[highlight]" value="<?php echo esc_attr($colors['highlight']); ?>" style="margin-right: 10px;" class="color-picker" />
-                                <input type="text" name="colors[highlight]" value="<?php echo esc_attr($colors['highlight']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" pattern="^#[0-9A-Fa-f]{6}$" placeholder="#FF0000" />
+                                <input type="color" value="<?php echo esc_attr($colors['highlight']); ?>" style="margin-right: 10px;" class="color-picker" />
+                                <input type="text" name="colors[highlight]" value="<?php echo esc_attr($colors['highlight']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" placeholder="#FF0000" />
                                 <p class="description">Color for countries with citations (click color box or enter hex code)</p>
                             </td>
                         </tr>
                         <tr>
                             <th>Default Color</th>
                             <td>
-                                <input type="color" name="colors[default]" value="<?php echo esc_attr($colors['default']); ?>" style="margin-right: 10px;" class="color-picker" />
-                                <input type="text" name="colors[default]" value="<?php echo esc_attr($colors['default']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" pattern="^#[0-9A-Fa-f]{6}$" placeholder="#FCFCFC" />
+                                <input type="color" value="<?php echo esc_attr($colors['default']); ?>" style="margin-right: 10px;" class="color-picker" />
+                                <input type="text" name="colors[default]" value="<?php echo esc_attr($colors['default']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" placeholder="#FCFCFC" />
                                 <p class="description">Color for countries without citations (click color box or enter hex code)</p>
                             </td>
                         </tr>
                         <tr>
                             <th>Border Color</th>
                             <td>
-                                <input type="color" name="colors[border]" value="<?php echo esc_attr($colors['border']); ?>" style="margin-right: 10px;" class="color-picker" />
-                                <input type="text" name="colors[border]" value="<?php echo esc_attr($colors['border']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" pattern="^#[0-9A-Fa-f]{6}$" placeholder="#999999" />
+                                <input type="color" value="<?php echo esc_attr($colors['border']); ?>" style="margin-right: 10px;" class="color-picker" />
+                                <input type="text" name="colors[border]" value="<?php echo esc_attr($colors['border']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" placeholder="#999999" />
                                 <p class="description">Country border color (click color box or enter hex code)</p>
                             </td>
                         </tr>
                         <tr>
                             <th>Water Color</th>
                             <td>
-                                <input type="color" name="colors[water]" value="<?php echo esc_attr($colors['water']); ?>" style="margin-right: 10px;" class="color-picker" />
-                                <input type="text" name="colors[water]" value="<?php echo esc_attr($colors['water']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" pattern="^#[0-9A-Fa-f]{6}$" placeholder="#E6F3FF" />
+                                <input type="color" value="<?php echo esc_attr($colors['water']); ?>" style="margin-right: 10px;" class="color-picker" />
+                                <input type="text" name="colors[water]" value="<?php echo esc_attr($colors['water']); ?>" style="width: 80px; padding: 3px 6px; font-family: monospace; text-transform: uppercase;" class="hex-input" placeholder="#E6F3FF" />
                                 <p class="description">Ocean/water background color (click color box or enter hex code)</p>
                             </td>
                         </tr>
@@ -426,6 +528,8 @@ function zotero_viz_admin_page() {
                             }
                             $displayName.val(suggestedName);
                         }
+                    } else {
+                        window.alert('Could not parse that Zotero URL. Use a group library URL, or fill Group ID and Library Name manually.');
                     }
                 });
             }
@@ -1225,12 +1329,7 @@ function zotero_viz_enqueue_scripts() {
         wp_enqueue_style('zotero-viz', ZOTERO_VIZ_PLUGIN_URL . 'assets/zotero-viz.css', array(), ZOTERO_VIZ_VERSION);
         
         // Pass data to JavaScript
-        $colors = get_option('zotero_viz_colors', array(
-            'highlight' => '#ff0000',
-            'default' => '#cccccc',
-            'border' => '#999999',
-            'water' => '#e6f3ff'
-        ));
+        $colors = zotero_viz_sanitize_colors(get_option('zotero_viz_colors', array()));
         
         wp_localize_script('zotero-viz', 'zoteroVizData', array(
             'pluginUrl' => ZOTERO_VIZ_PLUGIN_URL,
