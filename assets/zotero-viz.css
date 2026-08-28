@@ -1,0 +1,326 @@
+/* Zotero Visualizations Styles */
+
+/* Map styles */
+.zotero-map {
+    position: relative; /* Essential for proper zoom control positioning */
+    background-color: #f0f0f0;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+    /* Responsive height based on viewport */
+    min-height: 300px;
+    max-height: 80vh; /* Never exceed 80% of viewport height */
+}
+
+/* Mobile-first responsive heights */
+@media (max-width: 768px) {
+    .zotero-map {
+        height: 50vh !important; /* 50% of viewport height on mobile */
+        min-height: 250px;
+        max-height: 400px;
+    }
+    
+    .zotero-timeline {
+        height: 40vh !important; /* Shorter timeline on mobile */
+        min-height: 200px;
+        max-height: 300px;
+    }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+    .zotero-map {
+        height: 60vh !important; /* Medium height for tablets */
+        min-height: 350px;
+    }
+    
+    .zotero-timeline {
+        height: 45vh !important;
+        min-height: 250px;
+    }
+}
+
+@media (min-width: 1025px) {
+    .zotero-map {
+        /* Use specified height or default to reasonable size */
+        min-height: 400px;
+    }
+    
+    .zotero-timeline {
+        min-height: 300px;
+    }
+}
+
+.zotero-map-container {
+    width: 100%;
+    height: 100%;
+}
+
+.zotero-map .country {
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.zotero-map .country:hover {
+    opacity: 0.8;
+}
+
+.zotero-map .water {
+    cursor: grab;
+}
+
+.zotero-map .water:active {
+    cursor: grabbing;
+}
+
+/* Mobile-optimized zoom controls */
+.zoom-controls {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: white;
+    border-radius: 4px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    padding: 2px;
+    z-index: 1000;
+}
+
+@media (max-width: 768px) {
+    .zoom-controls {
+        top: 5px;
+        right: 5px;
+        padding: 1px;
+    }
+    
+    .zoom-controls button {
+        width: 28px;
+        height: 28px;
+        font-size: 16px;
+        margin: 1px;
+    }
+}
+
+.zoom-controls button {
+    width: 30px;
+    height: 30px;
+    border: 1px solid #ccc;
+    background: white;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0;
+    margin: 2px;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+}
+
+.zoom-controls button:hover {
+    background-color: #f0f0f0;
+}
+
+.zoom-controls button:active {
+    background-color: #e0e0e0;
+}
+
+/* Tooltip styles */
+.zotero-map-tooltip {
+    position: absolute;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    border-radius: 4px;
+    font-size: 14px;
+    pointer-events: none;
+    z-index: 1000;
+    white-space: nowrap;
+}
+
+/* Mobile tooltip adjustments */
+@media (max-width: 768px) {
+    .zotero-map-tooltip {
+        font-size: 12px;
+        padding: 6px 10px;
+        max-width: 200px;
+        white-space: normal;
+    }
+}
+
+/* Timeline/Bar chart styles */
+.zotero-timeline {
+    background-color: #fff;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    min-height: 300px;
+}
+
+@media (max-width: 768px) {
+    .zotero-timeline {
+        padding: 5px;
+    }
+}
+
+.zotero-timeline-container {
+    width: 100%;
+    height: 100%;
+}
+
+.zotero-timeline svg {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.zotero-timeline .bar {
+    transition: opacity 0.2s;
+}
+
+.zotero-timeline .bar:hover {
+    opacity: 0.8;
+}
+
+/* Axis styling with smaller, normal weight labels */
+.zotero-timeline .x-axis text,
+.zotero-timeline .y-axis text {
+    font-size: 12px !important;
+    font-weight: normal !important;
+    fill: #333;
+}
+
+/* Mobile axis adjustments */
+@media (max-width: 768px) {
+    .zotero-timeline .x-axis text,
+    .zotero-timeline .y-axis text {
+        font-size: 10px !important;
+    }
+}
+
+/* Axis title styling - keep these bold */
+.zotero-timeline svg text[style*="font-weight: bold"] {
+    font-size: 16px !important;
+    font-weight: bold !important;
+}
+
+@media (max-width: 768px) {
+    .zotero-timeline svg text[style*="font-weight: bold"] {
+        font-size: 14px !important;
+    }
+}
+
+.zotero-timeline .axis path,
+.zotero-timeline .axis line,
+.zotero-timeline .x-axis path,
+.zotero-timeline .x-axis line,
+.zotero-timeline .y-axis path,
+.zotero-timeline .y-axis line {
+    fill: none;
+    stroke: #666;
+    shape-rendering: crispEdges;
+}
+
+/* Admin page styles */
+.zotero-viz-admin-table {
+    margin-top: 20px;
+}
+
+.zotero-viz-admin-table input[type="text"] {
+    width: 100%;
+}
+
+.zotero-viz-admin-table .button {
+    white-space: nowrap;
+}
+
+/* Zotero Stats Shortcode Styles */
+
+/* Base stats styling */
+.zotero-stats {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    line-height: 1.5;
+    margin: 1em 0;
+}
+
+/* Default style */
+.zotero-stats-default {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 12px 16px;
+    color: #495057;
+    font-size: 14px;
+}
+
+/* Minimal style */
+.zotero-stats-minimal {
+    font-size: 13px;
+    color: #666;
+    font-style: italic;
+}
+
+/* Highlighted style */
+.zotero-stats-highlighted {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 6px;
+    padding: 14px 18px;
+    color: #856404;
+    font-size: 15px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+/* Detailed format specific styles */
+.zotero-stats .zotero-stats-header {
+    font-weight: 600;
+    font-size: 16px;
+    margin-bottom: 10px;
+    color: #333;
+    border-bottom: 1px solid #dee2e6;
+    padding-bottom: 6px;
+}
+
+.zotero-stats .zotero-stats-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.zotero-stats .zotero-stat-item {
+    flex: 1;
+    min-width: 120px;
+    text-align: center;
+}
+
+.zotero-stats .zotero-stat-number {
+    font-weight: 700;
+    font-size: 18px;
+    color: #0073aa;
+    display: block;
+}
+
+.zotero-stats .zotero-stat-label {
+    font-size: 12px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.zotero-stats .zotero-stat-range {
+    font-size: 11px;
+    color: #999;
+    font-weight: normal;
+}
+
+/* Responsive design */
+@media (max-width: 600px) {
+    .zotero-stats .zotero-stats-content {
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    .zotero-stats .zotero-stat-item {
+        text-align: left;
+        min-width: auto;
+    }
+    
+    .zotero-stats .zotero-stat-number {
+        display: inline;
+        margin-right: 8px;
+    }
+}
