@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Zotero Visualizations
  * Description: Display interactive world maps and bar charts from Zotero collections
- * Version: 1.0.8
+ * Version: 1.0.9
  * Author: Daniel J. Vreeman, PT, DPT, MS, FACMI, FIAHSI
  * License: GPL v2 or later
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ZOTERO_VIZ_VERSION', '1.0.8'); // Increment this to force cache refresh
+define('ZOTERO_VIZ_VERSION', '1.0.9'); // Increment this to force asset/cache refresh
 define('ZOTERO_VIZ_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ZOTERO_VIZ_PLUGIN_URL', plugin_dir_url(__FILE__));
 

@@ -487,12 +487,7 @@ function drawZoteroMap(containerId, countryData) {
 function drawZoteroTimeline(containerId, yearData) {
     const container = document.querySelector(`#${containerId} .zotero-timeline-container`);
     
-    // Get dimensions with increased margins for better spacing
-    const margin = {top: 20, right: 30, bottom: 60, left: 70};
-    const width = container.offsetWidth - margin.left - margin.right;
-    const height = (container.offsetHeight || 400) - margin.top - margin.bottom;
-    
-    // Process data
+    // Process data first so the legend can sit above the plot, not on the bars
     const currentYear = new Date().getFullYear();
     const data = Object.entries(yearData)
         .filter(([year, count]) => !year.includes('_projected') && !year.includes('_actual'))
@@ -510,6 +505,11 @@ function drawZoteroTimeline(containerId, yearData) {
             currentYearEntry.projectedCount = yearData[currentYear + '_projected'];
         }
     }
+
+    const hasProjection = data.some(d => d.projectedCount > 0);
+    const margin = {top: 44, right: 30, bottom: 60, left: 70};
+    const width = container.offsetWidth - margin.left - margin.right;
+    const height = (container.offsetHeight || 400) - margin.top - margin.bottom;
     
     // Create SVG
     const svg = d3.select(container)
@@ -593,37 +593,35 @@ function drawZoteroTimeline(containerId, yearData) {
         .attr('height', d => height - y(d.actualCount + d.projectedCount) - (height - y(d.actualCount)))
         .style('fill', '#ffcccc');
     
-    // Add legend
+    // Horizontal legend above the plot so it never covers the latest-year bars
+    const legendItems = [{ label: 'Actual', color: '#dc3545' }];
+    if (hasProjection) {
+        legendItems.push({ label: 'Projected', color: '#ffcccc' });
+    }
+
+    const legendItemWidth = 110;
     const legend = svg.append('g')
-        .attr('transform', `translate(${width - 100}, 0)`);
-    
-    legend.append('rect')
-        .attr('x', 0)
-        .attr('y', 0)
+        .attr('class', 'legend')
+        .attr('transform', `translate(${(width - legendItems.length * legendItemWidth) / 2}, ${-margin.top + 10})`);
+
+    const legendItem = legend.selectAll('.legend-item')
+        .data(legendItems)
+        .enter()
+        .append('g')
+        .attr('class', 'legend-item')
+        .attr('transform', (d, i) => `translate(${i * legendItemWidth}, 0)`);
+
+    legendItem.append('rect')
         .attr('width', 18)
         .attr('height', 18)
-        .style('fill', '#dc3545');
-    
-    legend.append('text')
+        .attr('rx', 2)
+        .style('fill', d => d.color);
+
+    legendItem.append('text')
         .attr('x', 24)
         .attr('y', 9)
-        .attr('dy', '.35em')
-        .style('text-anchor', 'start')
-        .text('Actual');
-    
-    if (data.some(d => d.projectedCount > 0)) {
-        legend.append('rect')
-            .attr('x', 0)
-            .attr('y', 25)
-            .attr('width', 18)
-            .attr('height', 18)
-            .style('fill', '#ffcccc');
-        
-        legend.append('text')
-            .attr('x', 24)
-            .attr('y', 34)
-            .attr('dy', '.35em')
-            .style('text-anchor', 'start')
-            .text('Projected');
-    }
+        .attr('dy', '0.35em')
+        .style('font-size', '13px')
+        .style('fill', '#333')
+        .text(d => d.label);
 }
