@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Zotero Visualizations
  * Description: Display interactive world maps and bar charts from Zotero collections
- * Version: 1.0.7
+ * Version: 1.0.8
  * Author: Daniel J. Vreeman, PT, DPT, MS, FACMI, FIAHSI
  * License: GPL v2 or later
  */
@@ -13,17 +13,68 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ZOTERO_VIZ_VERSION', '1.0.6'); // Increment this to force cache refresh
+define('ZOTERO_VIZ_VERSION', '1.0.8'); // Increment this to force cache refresh
 define('ZOTERO_VIZ_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ZOTERO_VIZ_PLUGIN_URL', plugin_dir_url(__FILE__));
-define('ZOTERO_VIZ_CACHE_DIR', WP_CONTENT_DIR . '/cache/zotero-viz/');
+
+/**
+ * Persistent cache lives in uploads, not wp-content/cache.
+ * Caching plugins routinely delete everything under wp-content/cache.
+ */
+function zotero_viz_legacy_cache_dir() {
+    return WP_CONTENT_DIR . '/cache/zotero-viz/';
+}
+
+function zotero_viz_cache_dir() {
+    $upload = wp_upload_dir();
+    if (!empty($upload['error']) || empty($upload['basedir'])) {
+        return WP_CONTENT_DIR . '/zotero-viz-cache/';
+    }
+    return trailingslashit($upload['basedir']) . 'zotero-viz/';
+}
+
+function zotero_viz_ensure_cache_dir() {
+    $dir = zotero_viz_cache_dir();
+    if (!file_exists($dir)) {
+        wp_mkdir_p($dir);
+    }
+    if (is_dir($dir) && !file_exists($dir . 'index.php')) {
+        file_put_contents($dir . 'index.php', "<?php\n// Silence is golden.\n");
+    }
+    return is_dir($dir) && is_writable($dir);
+}
+
+function zotero_viz_cache_file($display_name) {
+    $safe = sanitize_file_name($display_name);
+    if ($safe === '') {
+        $safe = 'library';
+    }
+    return zotero_viz_cache_dir() . $safe . '.json';
+}
+
+function zotero_viz_find_cache_file($display_name) {
+    $current = zotero_viz_cache_file($display_name);
+    if (file_exists($current)) {
+        return $current;
+    }
+
+    $legacy_names = array(
+        zotero_viz_legacy_cache_dir() . $display_name . '.json',
+        zotero_viz_legacy_cache_dir() . sanitize_file_name($display_name) . '.json',
+    );
+    foreach ($legacy_names as $legacy) {
+        if (file_exists($legacy)) {
+            return $legacy;
+        }
+    }
+
+    return $current;
+}
 
 // Create cache directory on activation
 register_activation_hook(__FILE__, 'zotero_viz_activate');
 function zotero_viz_activate() {
-    if (!file_exists(ZOTERO_VIZ_CACHE_DIR)) {
-        wp_mkdir_p(ZOTERO_VIZ_CACHE_DIR);
-    }
+    zotero_viz_ensure_cache_dir();
     
     // Schedule daily cache refresh
     if (!wp_next_scheduled('zotero_viz_daily_cache_refresh')) {
@@ -124,8 +175,15 @@ function zotero_viz_admin_page() {
     }
     
     if (isset($_POST['zotero_viz_refresh_cache'])) {
-        zotero_viz_refresh_all_caches();
-        echo '<div class="notice notice-success"><p>Cache refreshed!</p></div>';
+        $results = zotero_viz_refresh_all_caches();
+        if (empty($results)) {
+            echo '<div class="notice notice-warning"><p>No collections to cache. Add a collection on the Settings tab first.</p></div>';
+        } else {
+            foreach ($results as $result) {
+                $class = !empty($result['success']) ? 'notice-success' : 'notice-error';
+                echo '<div class="notice ' . $class . '"><p><strong>' . esc_html($result['display_name']) . ':</strong> ' . esc_html($result['message']) . '</p></div>';
+            }
+        }
     }
     
     $collections = get_option('zotero_viz_collections', array());
@@ -246,7 +304,17 @@ function zotero_viz_admin_page() {
             <?php elseif ($current_tab === 'cache'): ?>
                 <!-- Cache Status Tab -->
                 <h2>Cache Status</h2>
-                <p class="description">Monitor the status of your cached Zotero data. Cache refreshes automatically daily, or click "Refresh Cache Now" on the Settings tab.</p>
+                <p class="description">Monitor the status of your cached Zotero data. Cache refreshes automatically daily, or click "Refresh Cache Now" below.</p>
+                <p class="description"><strong>Cache directory:</strong> <code><?php echo esc_html(zotero_viz_cache_dir()); ?></code>
+                    <?php if (zotero_viz_ensure_cache_dir()): ?>
+                        — writable
+                    <?php else: ?>
+                        — <span style="color:#b32d2e;">not writable. WordPress cannot save cache files here.</span>
+                    <?php endif; ?>
+                </p>
+                <form method="post" style="margin: 12px 0 16px;">
+                    <input type="submit" name="zotero_viz_refresh_cache" class="button button-secondary" value="Refresh Cache Now" />
+                </form>
                 
                 <table class="wp-list-table widefat fixed striped">
                     <thead>
@@ -267,7 +335,7 @@ function zotero_viz_admin_page() {
                         } else {
                             foreach ($collections as $collection) {
                                 $display_name = $collection['display_name'] ?? $collection['library_name'];
-                                $cache_file = ZOTERO_VIZ_CACHE_DIR . $display_name . '.json';
+                                $cache_file = zotero_viz_find_cache_file($display_name);
                                 if (file_exists($cache_file)) {
                                     $cache_data = json_decode(file_get_contents($cache_file), true);
                                     $type = empty($collection['collection_key']) ? 'Full Library' : 'Collection';
@@ -702,53 +770,89 @@ function zotero_viz_fetch_collection_items($group_id, $collection_key = null) {
     $items = array();
     $start = 0;
     $limit = 100;
+    $max_retries = 3;
     
-    // Determine API endpoint
+    $group_id = rawurlencode($group_id);
     if ($collection_key) {
-        // Specific collection
-        $base_url = "https://api.zotero.org/groups/{$group_id}/collections/{$collection_key}/items";
+        $base_url = "https://api.zotero.org/groups/{$group_id}/collections/" . rawurlencode($collection_key) . "/items/top";
     } else {
-        // Entire library (excluding trash)
-        $base_url = "https://api.zotero.org/groups/{$group_id}/items";
+        $base_url = "https://api.zotero.org/groups/{$group_id}/items/top";
+    }
+    
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300);
     }
     
     do {
         $url = $base_url . "?format=json&limit={$limit}&start={$start}";
+        $data = null;
+        $response = null;
+        $last_error = '';
         
-        // Add parameter to exclude trashed items when fetching entire library
-        if (!$collection_key) {
-            $url .= "&itemType=-attachment&trashedItemsOnly=0";
+        for ($attempt = 1; $attempt <= $max_retries; $attempt++) {
+            // Anonymous Zotero API limit is ~1 request/second
+            if ($start > 0 || $attempt > 1) {
+                usleep(1100000);
+            }
+            
+            $response = wp_remote_get($url, array(
+                'timeout' => 60,
+                'headers' => array(
+                    'Zotero-API-Version' => '3'
+                )
+            ));
+            
+            if (is_wp_error($response)) {
+                $last_error = $response->get_error_message();
+                continue;
+            }
+            
+            $code = wp_remote_retrieve_response_code($response);
+            if ($code == 429) {
+                $last_error = 'Zotero API rate limit (HTTP 429)';
+                sleep(3);
+                continue;
+            }
+            if ($code < 200 || $code >= 300) {
+                $body_preview = wp_remote_retrieve_body($response);
+                $last_error = 'Zotero API HTTP ' . $code . ': ' . substr(wp_strip_all_tags($body_preview), 0, 200);
+                continue;
+            }
+            
+            $decoded = json_decode(wp_remote_retrieve_body($response), true);
+            if (!is_array($decoded)) {
+                $last_error = 'Invalid JSON from Zotero API';
+                continue;
+            }
+            if (isset($decoded['error']) && !isset($decoded[0])) {
+                $last_error = 'Zotero API error: ' . $decoded['error'];
+                continue;
+            }
+            
+            $data = $decoded;
+            break;
         }
         
-        $response = wp_remote_get($url, array(
-            'timeout' => 30,
-            'headers' => array(
-                'Zotero-API-Version' => '3'
-            )
-        ));
-        
-        if (is_wp_error($response)) {
-            return false;
+        if ($data === null) {
+            return new WP_Error('zotero_viz_fetch', $last_error ?: 'Failed to fetch items from Zotero');
         }
-        
-        $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
         
         if (empty($data)) {
             break;
         }
         
-        // Filter out attachments and notes
         foreach ($data as $item) {
-            if (isset($item['data']['itemType']) && 
-                !in_array($item['data']['itemType'], array('attachment', 'note'))) {
+            if (!is_array($item)) {
+                continue;
+            }
+            if (isset($item['data']['itemType']) &&
+                !in_array($item['data']['itemType'], array('attachment', 'note'), true)) {
                 $items[] = $item;
             }
         }
         
         $start += $limit;
         
-        // Check if we have more results
         $total_results = wp_remote_retrieve_header($response, 'total-results');
         if ($total_results && $start >= intval($total_results)) {
             break;
@@ -880,7 +984,7 @@ function zotero_viz_stats_shortcode($atts) {
     }
     
     // Use display name for cache file lookup
-    $cache_file = ZOTERO_VIZ_CACHE_DIR . $atts['library'] . '.json';
+    $cache_file = zotero_viz_find_cache_file($atts['library']);
     if (!file_exists($cache_file)) {
         return '<p>Library data not found. Please refresh cache. Looking for: ' . esc_html($atts['library']) . '</p>';
     }
@@ -997,41 +1101,86 @@ function zotero_viz_stats_shortcode($atts) {
 
 // Cache refresh function
 function zotero_viz_refresh_all_caches() {
+    $results = array();
     $collections = get_option('zotero_viz_collections', array());
     
+    if (!zotero_viz_ensure_cache_dir()) {
+        return array(
+            array(
+                'display_name' => '(all)',
+                'success' => false,
+                'message' => 'Cache directory is not writable: ' . zotero_viz_cache_dir()
+            )
+        );
+    }
+    
     foreach ($collections as $collection) {
-        // Skip if no group_id or library_name
+        $display_name = !empty($collection['display_name']) ? $collection['display_name'] : ($collection['library_name'] ?? '');
+        if ($display_name === '') {
+            $display_name = '(unnamed)';
+        }
+        
         if (empty($collection['group_id']) || empty($collection['library_name'])) {
+            $results[] = array(
+                'display_name' => $display_name,
+                'success' => false,
+                'message' => 'Skipped: missing Group ID or Library Name'
+            );
             continue;
         }
         
-        // Get display name, fallback to library name if not set
-        $display_name = !empty($collection['display_name']) ? $collection['display_name'] : $collection['library_name'];
-        
-        // Fetch items - collection_key is optional
         $collection_key = !empty($collection['collection_key']) ? $collection['collection_key'] : null;
         $items = zotero_viz_fetch_collection_items($collection['group_id'], $collection_key);
         
-        if ($items !== false) {
-            $map_data = zotero_viz_process_map_data($items);
-            $timeline_data = zotero_viz_process_timeline_data($items);
-            
-            $cache_data = array(
-                'map' => $map_data,
-                'timeline' => $timeline_data,
-                'updated' => time(),
-                'item_count' => count($items),
-                'collection_key' => $collection_key,
-                'library_name' => $collection['library_name'], // Store original library name
+        if (is_wp_error($items)) {
+            $results[] = array(
                 'display_name' => $display_name,
-                'group_id' => $collection['group_id']
+                'success' => false,
+                'message' => $items->get_error_message()
             );
-            
-            // Use display name for cache file
-            $cache_file = ZOTERO_VIZ_CACHE_DIR . $display_name . '.json';
-            file_put_contents($cache_file, json_encode($cache_data));
+            continue;
         }
+        
+        $cache_data = array(
+            'map' => zotero_viz_process_map_data($items),
+            'timeline' => zotero_viz_process_timeline_data($items),
+            'updated' => time(),
+            'item_count' => count($items),
+            'collection_key' => $collection_key,
+            'library_name' => $collection['library_name'],
+            'display_name' => $display_name,
+            'group_id' => $collection['group_id']
+        );
+        
+        $cache_file = zotero_viz_cache_file($display_name);
+        $json = wp_json_encode($cache_data);
+        if ($json === false) {
+            $results[] = array(
+                'display_name' => $display_name,
+                'success' => false,
+                'message' => 'Failed to encode cache JSON'
+            );
+            continue;
+        }
+        
+        $written = file_put_contents($cache_file, $json, LOCK_EX);
+        if ($written === false) {
+            $results[] = array(
+                'display_name' => $display_name,
+                'success' => false,
+                'message' => 'Failed to write cache file: ' . $cache_file
+            );
+            continue;
+        }
+        
+        $results[] = array(
+            'display_name' => $display_name,
+            'success' => true,
+            'message' => count($items) . ' items cached'
+        );
     }
+    
+    return $results;
 }
 
 // Daily cache refresh
@@ -1104,7 +1253,7 @@ function zotero_viz_map_shortcode($atts) {
     }
     
     // Use display name for cache file lookup
-    $cache_file = ZOTERO_VIZ_CACHE_DIR . $atts['library'] . '.json';
+    $cache_file = zotero_viz_find_cache_file($atts['library']);
     if (!file_exists($cache_file)) {
         return '<p>Library data not found. Please refresh cache. Looking for: ' . esc_html($atts['library']) . '</p>';
     }
@@ -1153,7 +1302,7 @@ function zotero_viz_timeline_shortcode($atts) {
     }
     
     // Use display name for cache file lookup
-    $cache_file = ZOTERO_VIZ_CACHE_DIR . $atts['library'] . '.json';
+    $cache_file = zotero_viz_find_cache_file($atts['library']);
     if (!file_exists($cache_file)) {
         return '<p>Library data not found. Please refresh cache. Looking for: ' . esc_html($atts['library']) . '</p>';
     }
