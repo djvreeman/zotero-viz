@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Zotero Visualizations
  * Description: Display interactive world maps and bar charts from Zotero collections
- * Version: 1.0.11
+ * Version: 1.0.12
  * Author: Daniel J. Vreeman, PT, DPT, MS, FACMI, FIAHSI
  * License: GPL v2 or later
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ZOTERO_VIZ_VERSION', '1.0.11'); // Increment this to force asset/cache refresh
+define('ZOTERO_VIZ_VERSION', '1.0.12'); // Increment this to force asset/cache refresh
 define('ZOTERO_VIZ_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ZOTERO_VIZ_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -1154,79 +1154,115 @@ function zotero_viz_fetch_collection_items($group_id, $collection_key = null) {
     return $items;
 }
 
+function zotero_viz_country_key($name) {
+    $name = trim((string) $name);
+    if ($name === '') {
+        return '';
+    }
+    if (function_exists('mb_strtolower')) {
+        return mb_strtolower($name, 'UTF-8');
+    }
+    return strtolower($name);
+}
+
+function zotero_viz_valid_countries() {
+    return array(
+        'United States', 'Canada', 'Mexico',
+        'Guatemala', 'Belize', 'El Salvador', 'Honduras', 'Nicaragua', 'Costa Rica', 'Panama',
+        'Cuba', 'Haiti', 'Dominican Republic', 'Jamaica', 'Trinidad and Tobago', 'Barbados',
+        'Saint Lucia', 'Grenada', 'Saint Vincent and the Grenadines', 'Antigua and Barbuda',
+        'Dominica', 'Saint Kitts and Nevis',
+        'Brazil', 'Argentina', 'Chile', 'Peru', 'Colombia', 'Venezuela', 'Ecuador', 'Bolivia',
+        'Paraguay', 'Uruguay', 'Guyana', 'Suriname',
+        'United Kingdom', 'France', 'Germany', 'Spain', 'Italy', 'Poland', 'Netherlands',
+        'Belgium', 'Czech Republic', 'Greece', 'Portugal', 'Sweden', 'Hungary', 'Austria',
+        'Belarus', 'Switzerland', 'Bulgaria', 'Denmark', 'Finland', 'Slovakia', 'Norway',
+        'Ireland', 'Croatia', 'Moldova', 'Bosnia and Herzegovina', 'Albania', 'Lithuania',
+        'Slovenia', 'Latvia', 'Estonia', 'North Macedonia', 'Serbia', 'Montenegro',
+        'Luxembourg', 'Malta', 'Iceland', 'Andorra', 'Monaco', 'Liechtenstein', 'San Marino',
+        'Romania', 'Ukraine', 'Cyprus', 'Kosovo',
+        'China', 'Japan', 'India', 'South Korea', 'Indonesia', 'Thailand', 'Vietnam',
+        'Philippines', 'Malaysia', 'Singapore', 'Bangladesh', 'Pakistan', 'Afghanistan',
+        'Nepal', 'Sri Lanka', 'Myanmar', 'Cambodia', 'Laos', 'Mongolia', 'Bhutan',
+        'Timor-Leste', 'Brunei', 'Maldives', 'North Korea',
+        'Turkey', 'Saudi Arabia', 'Israel', 'United Arab Emirates', 'Iran', 'Iraq', 'Jordan',
+        'Lebanon', 'Kuwait', 'Qatar', 'Bahrain', 'Oman', 'Yemen', 'Syria', 'Palestine',
+        'Kazakhstan', 'Uzbekistan', 'Turkmenistan', 'Tajikistan', 'Kyrgyzstan',
+        'Azerbaijan', 'Armenia', 'Georgia',
+        'South Africa', 'Nigeria', 'Kenya', 'Egypt', 'Morocco', 'Ethiopia', 'Ghana',
+        'Tanzania', 'Algeria', 'Sudan', 'Uganda', 'Mozambique', 'Madagascar', 'Cameroon',
+        'Angola', 'Niger', 'Burkina Faso', 'Mali', 'Malawi', 'Zambia', 'Senegal',
+        'Somalia', 'Chad', 'Zimbabwe', 'Guinea', 'Rwanda', 'Benin', 'Burundi', 'Tunisia',
+        'South Sudan', 'Togo', 'Sierra Leone', 'Libya', 'Liberia', 'Mauritania',
+        'Central African Republic', 'Eritrea', 'Gambia', 'Botswana', 'Namibia', 'Gabon',
+        'Lesotho', 'Guinea-Bissau', 'Equatorial Guinea', 'Mauritius', 'Eswatini',
+        'Djibouti', 'Comoros', 'Cape Verde', 'Sao Tome and Principe', 'Seychelles',
+        'Congo', 'Democratic Republic of the Congo', "Cote d'Ivoire",
+        'Australia', 'New Zealand', 'Papua New Guinea', 'Fiji', 'Solomon Islands',
+        'Vanuatu', 'Samoa', 'Kiribati', 'Micronesia', 'Tonga', 'Palau', 'Marshall Islands',
+        'Tuvalu', 'Nauru',
+        'Russia', 'Greenland'
+    );
+}
+
+function zotero_viz_country_alias_map() {
+    static $map = null;
+    if ($map !== null) {
+        return $map;
+    }
+
+    $map = array();
+    foreach (zotero_viz_valid_countries() as $canonical) {
+        $map[zotero_viz_country_key($canonical)] = $canonical;
+    }
+
+    $file = ZOTERO_VIZ_PLUGIN_DIR . 'assets/country-mappings.json';
+    if (is_readable($file)) {
+        $aliases = json_decode(file_get_contents($file), true);
+        if (is_array($aliases)) {
+            foreach ($aliases as $from => $to) {
+                if (!is_string($from) || !is_string($to) || $to === '') {
+                    continue;
+                }
+                $map[zotero_viz_country_key($from)] = $to;
+            }
+        }
+    }
+
+    return $map;
+}
+
+function zotero_viz_canonical_country($tag) {
+    $key = zotero_viz_country_key($tag);
+    if ($key === '') {
+        return '';
+    }
+    $map = zotero_viz_country_alias_map();
+    if (!isset($map[$key])) {
+        return '';
+    }
+    $canonical = $map[$key];
+    return in_array($canonical, zotero_viz_valid_countries(), true) ? $canonical : '';
+}
+
 // Process citations for map data
 function zotero_viz_process_map_data($items) {
     $country_counts = array();
     
     foreach ($items as $item) {
-        if (isset($item['data']['tags'])) {
-            foreach ($item['data']['tags'] as $tag) {
-                $country = $tag['tag'];
-                // Comprehensive list of World Bank country names
-                $valid_countries = array(
-                    // North America
-                    'United States', 'Canada', 'Mexico',
-                    
-                    // Central America & Caribbean
-                    'Guatemala', 'Belize', 'El Salvador', 'Honduras', 'Nicaragua', 'Costa Rica', 'Panama',
-                    'Cuba', 'Haiti', 'Dominican Republic', 'Jamaica', 'Trinidad and Tobago', 'Barbados',
-                    'Saint Lucia', 'Grenada', 'Saint Vincent and the Grenadines', 'Antigua and Barbuda',
-                    'Dominica', 'Saint Kitts and Nevis',
-                    
-                    // South America
-                    'Brazil', 'Argentina', 'Chile', 'Peru', 'Colombia', 'Venezuela', 'Ecuador', 'Bolivia',
-                    'Paraguay', 'Uruguay', 'Guyana', 'Suriname',
-                    
-                    // Europe
-                    'United Kingdom', 'France', 'Germany', 'Spain', 'Italy', 'Poland', 'Netherlands',
-                    'Belgium', 'Czech Republic', 'Greece', 'Portugal', 'Sweden', 'Hungary', 'Austria',
-                    'Belarus', 'Switzerland', 'Bulgaria', 'Denmark', 'Finland', 'Slovakia', 'Norway',
-                    'Ireland', 'Croatia', 'Moldova', 'Bosnia and Herzegovina', 'Albania', 'Lithuania',
-                    'Slovenia', 'Latvia', 'Estonia', 'North Macedonia', 'Serbia', 'Montenegro',
-                    'Luxembourg', 'Malta', 'Iceland', 'Andorra', 'Monaco', 'Liechtenstein', 'San Marino',
-                    'Romania', 'Ukraine', 'Cyprus', 'Kosovo',
-                    
-                    // Asia
-                    'China', 'Japan', 'India', 'South Korea', 'Indonesia', 'Thailand', 'Vietnam',
-                    'Philippines', 'Malaysia', 'Singapore', 'Bangladesh', 'Pakistan', 'Afghanistan',
-                    'Nepal', 'Sri Lanka', 'Myanmar', 'Cambodia', 'Laos', 'Mongolia', 'Bhutan',
-                    'Timor-Leste', 'Brunei', 'Maldives', 'North Korea',
-                    
-                    // Middle East
-                    'Turkey', 'Saudi Arabia', 'Israel', 'United Arab Emirates', 'Iran', 'Iraq', 'Jordan',
-                    'Lebanon', 'Kuwait', 'Qatar', 'Bahrain', 'Oman', 'Yemen', 'Syria', 'Palestine',
-                    
-                    // Central Asia
-                    'Kazakhstan', 'Uzbekistan', 'Turkmenistan', 'Tajikistan', 'Kyrgyzstan',
-                    'Azerbaijan', 'Armenia', 'Georgia',
-                    
-                    // Africa
-                    'South Africa', 'Nigeria', 'Kenya', 'Egypt', 'Morocco', 'Ethiopia', 'Ghana',
-                    'Tanzania', 'Algeria', 'Sudan', 'Uganda', 'Mozambique', 'Madagascar', 'Cameroon',
-                    'Angola', 'Niger', 'Burkina Faso', 'Mali', 'Malawi', 'Zambia', 'Senegal',
-                    'Somalia', 'Chad', 'Zimbabwe', 'Guinea', 'Rwanda', 'Benin', 'Burundi', 'Tunisia',
-                    'South Sudan', 'Togo', 'Sierra Leone', 'Libya', 'Liberia', 'Mauritania',
-                    'Central African Republic', 'Eritrea', 'Gambia', 'Botswana', 'Namibia', 'Gabon',
-                    'Lesotho', 'Guinea-Bissau', 'Equatorial Guinea', 'Mauritius', 'Eswatini',
-                    'Djibouti', 'Comoros', 'Cape Verde', 'Sao Tome and Principe', 'Seychelles',
-                    'Congo', 'Democratic Republic of the Congo', "Cote d'Ivoire",
-                    
-                    // Oceania
-                    'Australia', 'New Zealand', 'Papua New Guinea', 'Fiji', 'Solomon Islands',
-                    'Vanuatu', 'Samoa', 'Kiribati', 'Micronesia', 'Tonga', 'Palau', 'Marshall Islands',
-                    'Tuvalu', 'Nauru',
-                    
-                    // Others
-                    'Russia', 'Greenland'
-                );
-                
-                if (in_array($country, $valid_countries)) {
-                    if (!isset($country_counts[$country])) {
-                        $country_counts[$country] = 0;
-                    }
-                    $country_counts[$country]++;
-                }
+        if (empty($item['data']['tags']) || !is_array($item['data']['tags'])) {
+            continue;
+        }
+        foreach ($item['data']['tags'] as $tag) {
+            $raw = is_array($tag) && isset($tag['tag']) ? $tag['tag'] : '';
+            $country = zotero_viz_canonical_country($raw);
+            if ($country === '') {
+                continue;
             }
+            if (!isset($country_counts[$country])) {
+                $country_counts[$country] = 0;
+            }
+            $country_counts[$country]++;
         }
     }
     
