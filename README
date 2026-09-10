@@ -120,7 +120,7 @@ Customize visualization colors:
 ### Cache Management
 
 - Click **Save Settings** to save your configuration (including API key)
-- Click **Refresh Cache Now** to fetch/update data (requires a configured API key)
+- Click **Refresh Cache Now** to fetch/update data (requires a configured API key). A progress bar lists each library as it refreshes.
 - View cache status showing items cached, countries tagged, years covered, and last update time
 
 ## Usage
