@@ -14,6 +14,7 @@ A WordPress plugin that creates interactive visualizations from Zotero collectio
 - **Automatic Caching**: Daily updates with manual refresh option
 - **Customizable Colors**: Configure map and chart colors to match your theme
 - **SVG Tooltips**: Smooth, cursor-following tooltips with citation counts
+- **Authenticated Zotero Access**: Required API key for server-side cache refresh; never exposed on public pages
 
 ## Installation
 
@@ -56,9 +57,21 @@ Activate through WordPress admin panel
 
 1. Navigate to **Zotero Viz** in your WordPress admin menu
 2. Use the tabbed interface:
-   - **Settings**: Configure collections and colors
+   - **Settings**: Configure API key, collections, and colors
    - **Cache Status**: Monitor data processing
    - **Documentation**: View this README rendered in WordPress admin
+
+### Zotero API Key (Required)
+
+Cache refresh (manual and daily) requires a Zotero API key. Public shortcodes keep serving cached data; the key stays on the server.
+
+1. Create a key at [zotero.org/settings/keys](https://www.zotero.org/settings/keys)
+2. Grant the key access to the group libraries you want to visualize
+3. Paste it into **Zotero API Key** on the Settings tab and save
+
+The key is stored encrypted and is never shown again after saving. Leave the field blank to keep the current key. Use **Clear API key** to remove it.
+
+Without a key, cache refresh fails with an error. Existing cache files still render on the front end.
 
 ### Enhanced Collection Setup
 
@@ -106,8 +119,8 @@ Customize visualization colors:
 
 ### Cache Management
 
-- Click **Save Settings** to save your configuration
-- Click **Refresh Cache Now** to fetch/update data
+- Click **Save Settings** to save your configuration (including API key)
+- Click **Refresh Cache Now** to fetch/update data (requires a configured API key)
 - View cache status showing items cached, countries tagged, years covered, and last update time
 
 ## Usage
@@ -349,7 +362,8 @@ The plugin includes a built-in documentation viewer accessible from the WordPres
 
 ### API Integration
 
-- **Zotero API v3** with proper rate limiting
+- **Required Zotero API key** sent as the `Zotero-API-Key` header (never as a query string, never to the browser)
+- **Zotero API v3** with authenticated rate limiting
 - **Batch Processing**: 100 items per request to avoid timeouts
 - **Error Handling**: Graceful degradation with informative error messages
 - **Filtering**: Automatically excludes attachments, notes, and trashed items
