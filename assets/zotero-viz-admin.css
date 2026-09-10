@@ -17,15 +17,30 @@
 .zotero-viz-refresh-heading {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    gap: 12px;
     margin: 0 0 10px;
     font-size: 14px;
     font-weight: 600;
 }
 
+.zotero-viz-refresh-heading-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .zotero-viz-refresh-heading .spinner {
     float: none;
     margin: 0;
+}
+
+.zotero-viz-refresh-dismiss[hidden] {
+    display: none !important;
+}
+
+.zotero-viz-refresh-dismiss {
+    flex-shrink: 0;
 }
 
 .zotero-viz-progress-track {

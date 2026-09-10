@@ -42,9 +42,15 @@
         $('.zotero-viz-refresh-cache').prop('disabled', false);
         $('#zotero-viz-refresh-progress .spinner').removeClass('is-active');
         $('#zotero-viz-refresh-label').text(summary);
+        $('#zotero-viz-refresh-dismiss').removeAttr('hidden');
         if (ok) {
             $('#zotero-viz-refresh-progress').addClass('is-complete');
         }
+    }
+
+    function dismissRefresh() {
+        $('#zotero-viz-refresh-progress').attr('hidden', 'hidden').removeClass('is-complete');
+        $('#zotero-viz-refresh-dismiss').attr('hidden', 'hidden');
     }
 
     function refreshOne(libraries, index) {
@@ -119,6 +125,7 @@
             .removeClass('is-complete')
             .get(0).scrollIntoView({ behavior: 'smooth', block: 'start' });
         $('#zotero-viz-refresh-progress .spinner').addClass('is-active');
+        $('#zotero-viz-refresh-dismiss').attr('hidden', 'hidden');
         $('#zotero-viz-refresh-label').text('Preparing cache refresh…');
         $('#zotero-viz-refresh-libraries').empty();
         setProgress(0, 1);
@@ -156,5 +163,10 @@
     $(document).on('click', '.zotero-viz-refresh-cache', function (event) {
         event.preventDefault();
         startRefresh();
+    });
+
+    $(document).on('click', '#zotero-viz-refresh-dismiss', function (event) {
+        event.preventDefault();
+        dismissRefresh();
     });
 })(jQuery);
