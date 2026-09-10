@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Zotero Visualizations
  * Description: Display interactive world maps and bar charts from Zotero collections
- * Version: 1.0.10
+ * Version: 1.0.11
  * Author: Daniel J. Vreeman, PT, DPT, MS, FACMI, FIAHSI
  * License: GPL v2 or later
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ZOTERO_VIZ_VERSION', '1.0.10'); // Increment this to force asset/cache refresh
+define('ZOTERO_VIZ_VERSION', '1.0.11'); // Increment this to force asset/cache refresh
 define('ZOTERO_VIZ_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ZOTERO_VIZ_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -116,6 +116,116 @@ function zotero_viz_sanitize_colors($colors) {
         }
     }
     return $clean;
+}
+
+function zotero_viz_encryption_key() {
+    $material = (defined('AUTH_KEY') ? AUTH_KEY : '') . '|zotero-viz-api-key';
+    return hash('sha256', $material, true);
+}
+
+function zotero_viz_encrypt_api_key($plain) {
+    if (!is_string($plain) || $plain === '' || !function_exists('openssl_encrypt')) {
+        return false;
+    }
+    $iv = random_bytes(16);
+    $cipher = openssl_encrypt($plain, 'AES-256-CBC', zotero_viz_encryption_key(), OPENSSL_RAW_DATA, $iv);
+    if ($cipher === false) {
+        return false;
+    }
+    return base64_encode($iv . $cipher);
+}
+
+function zotero_viz_decrypt_api_key($stored) {
+    if (!is_string($stored) || $stored === '' || !function_exists('openssl_decrypt')) {
+        return '';
+    }
+    $raw = base64_decode($stored, true);
+    if ($raw === false || strlen($raw) < 17) {
+        return '';
+    }
+    $iv = substr($raw, 0, 16);
+    $cipher = substr($raw, 16);
+    $plain = openssl_decrypt($cipher, 'AES-256-CBC', zotero_viz_encryption_key(), OPENSSL_RAW_DATA, $iv);
+    return is_string($plain) ? $plain : '';
+}
+
+function zotero_viz_sanitize_api_key($key) {
+    $key = trim((string) $key);
+    $key = preg_replace('/[^A-Za-z0-9]/', '', $key);
+    return is_string($key) ? $key : '';
+}
+
+function zotero_viz_has_api_key() {
+    $stored = get_option('zotero_viz_api_key', '');
+    return is_string($stored) && $stored !== '';
+}
+
+function zotero_viz_get_api_key() {
+    $stored = get_option('zotero_viz_api_key', '');
+    if (!is_string($stored) || $stored === '') {
+        return '';
+    }
+    return zotero_viz_decrypt_api_key($stored);
+}
+
+function zotero_viz_set_api_key($plain) {
+    $encrypted = zotero_viz_encrypt_api_key($plain);
+    if ($encrypted === false) {
+        return false;
+    }
+    return update_option('zotero_viz_api_key', $encrypted, false);
+}
+
+function zotero_viz_clear_api_key() {
+    delete_option('zotero_viz_api_key');
+}
+
+function zotero_viz_api_headers($api_key) {
+    $headers = array(
+        'Zotero-API-Version' => '3'
+    );
+    if (is_string($api_key) && $api_key !== '') {
+        $headers['Zotero-API-Key'] = $api_key;
+    }
+    return $headers;
+}
+
+function zotero_viz_redact_api_error_body($body, $api_key) {
+    $text = substr(wp_strip_all_tags((string) $body), 0, 200);
+    if (is_string($api_key) && $api_key !== '') {
+        $text = str_replace($api_key, '[redacted]', $text);
+    }
+    return $text;
+}
+
+function zotero_viz_validate_api_key($api_key) {
+    $response = wp_remote_get('https://api.zotero.org/keys/current', array(
+        'timeout' => 30,
+        'headers' => zotero_viz_api_headers($api_key)
+    ));
+
+    if (is_wp_error($response)) {
+        return new WP_Error(
+            'zotero_viz_api_key',
+            'Could not reach Zotero to validate the API key: ' . $response->get_error_message()
+        );
+    }
+
+    $code = wp_remote_retrieve_response_code($response);
+    if ($code === 403 || $code === 401) {
+        return new WP_Error(
+            'zotero_viz_api_key',
+            'That Zotero API key is invalid or does not have access. Settings were not saved.'
+        );
+    }
+    if ($code < 200 || $code >= 300) {
+        return new WP_Error(
+            'zotero_viz_api_key',
+            'Zotero rejected the API key (HTTP ' . intval($code) . '). Settings were not saved.'
+        );
+    }
+
+    return true;
 }
 
 // Parse Zotero URL to extract components
@@ -227,6 +337,9 @@ function zotero_viz_collection_row_has_input($collection) {
 // AJAX handler for URL parsing
 add_action('wp_ajax_zotero_viz_parse_url', 'zotero_viz_ajax_parse_url');
 function zotero_viz_ajax_parse_url() {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error('Forbidden');
+    }
     check_ajax_referer('zotero_viz_parse', 'nonce');
     
     $url = sanitize_text_field($_POST['url']);
@@ -255,30 +368,63 @@ function zotero_viz_admin_menu() {
 
 // Admin page
 function zotero_viz_admin_page() {
+    if (!current_user_can('manage_options')) {
+        wp_die(esc_html__('You do not have permission to access this page.', 'zotero-viz'));
+    }
+
     // Handle form submissions
     if (isset($_POST['zotero_viz_save_settings'])) {
-        $collections = array();
-        $skipped = 0;
-        if (isset($_POST['collections']) && is_array($_POST['collections'])) {
-            foreach ($_POST['collections'] as $collection) {
-                $normalized = zotero_viz_normalize_collection($collection);
-                if ($normalized) {
-                    $collections[] = $normalized;
-                } elseif (zotero_viz_collection_row_has_input($collection)) {
-                    $skipped++;
-                }
+        check_admin_referer('zotero_viz_admin');
+
+        $clear_key = !empty($_POST['zotero_viz_clear_api_key']);
+        $posted_key = isset($_POST['zotero_viz_api_key'])
+            ? zotero_viz_sanitize_api_key(wp_unslash($_POST['zotero_viz_api_key']))
+            : '';
+        $save_rejected = false;
+
+        if ($clear_key) {
+            zotero_viz_clear_api_key();
+        } elseif ($posted_key !== '') {
+            $validation = zotero_viz_validate_api_key($posted_key);
+            if (is_wp_error($validation)) {
+                $save_rejected = true;
+                echo '<div class="notice notice-error"><p>' . esc_html($validation->get_error_message()) . '</p></div>';
+            } elseif (!zotero_viz_set_api_key($posted_key)) {
+                $save_rejected = true;
+                echo '<div class="notice notice-error"><p>Could not store the Zotero API key. Settings were not saved.</p></div>';
             }
         }
-        update_option('zotero_viz_collections', $collections);
-        $colors_in = isset($_POST['colors']) ? wp_unslash($_POST['colors']) : array();
-        update_option('zotero_viz_colors', zotero_viz_sanitize_colors($colors_in));
-        echo '<div class="notice notice-success"><p>Settings saved! ' . count($collections) . ' collection' . (count($collections) === 1 ? '' : 's') . ' stored.</p></div>';
-        if ($skipped > 0) {
-            echo '<div class="notice notice-error"><p>' . intval($skipped) . ' row(s) were not saved. Each collection needs a valid Zotero group URL, or both Group ID and Library Name.</p></div>';
+
+        if (!$save_rejected) {
+            $collections = array();
+            $skipped = 0;
+            if (isset($_POST['collections']) && is_array($_POST['collections'])) {
+                foreach ($_POST['collections'] as $collection) {
+                    $normalized = zotero_viz_normalize_collection($collection);
+                    if ($normalized) {
+                        $collections[] = $normalized;
+                    } elseif (zotero_viz_collection_row_has_input($collection)) {
+                        $skipped++;
+                    }
+                }
+            }
+            update_option('zotero_viz_collections', $collections);
+            $colors_in = isset($_POST['colors']) ? wp_unslash($_POST['colors']) : array();
+            update_option('zotero_viz_colors', zotero_viz_sanitize_colors($colors_in));
+            echo '<div class="notice notice-success"><p>Settings saved! ' . count($collections) . ' collection' . (count($collections) === 1 ? '' : 's') . ' stored.</p></div>';
+            if ($clear_key) {
+                echo '<div class="notice notice-warning"><p>Zotero API key cleared. Cache refresh will fail until a new key is saved.</p></div>';
+            } elseif ($posted_key !== '') {
+                echo '<div class="notice notice-success"><p>Zotero API key saved.</p></div>';
+            }
+            if ($skipped > 0) {
+                echo '<div class="notice notice-error"><p>' . intval($skipped) . ' row(s) were not saved. Each collection needs a valid Zotero group URL, or both Group ID and Library Name.</p></div>';
+            }
         }
     }
     
     if (isset($_POST['zotero_viz_refresh_cache'])) {
+        check_admin_referer('zotero_viz_admin');
         $results = zotero_viz_refresh_all_caches();
         if (empty($results)) {
             echo '<div class="notice notice-warning"><p>No collections to cache. Add a collection on the Settings tab first.</p></div>';
@@ -295,6 +441,7 @@ function zotero_viz_admin_page() {
         $collections = array();
     }
     $colors = zotero_viz_sanitize_colors(get_option('zotero_viz_colors', array()));
+    $has_api_key = zotero_viz_has_api_key();
     
     // Get current tab
     $current_tab = isset($_GET['tab']) ? $_GET['tab'] : 'settings';
@@ -319,6 +466,31 @@ function zotero_viz_admin_page() {
             <?php if ($current_tab === 'settings'): ?>
                 <!-- Settings Tab -->
                 <form method="post">
+                    <?php wp_nonce_field('zotero_viz_admin'); ?>
+                    <h2>API Authentication</h2>
+                    <?php if (!$has_api_key): ?>
+                        <div class="notice notice-warning inline"><p>A Zotero API key is required to fetch library data. Create one at <a href="https://www.zotero.org/settings/keys" target="_blank" rel="noopener noreferrer">zotero.org/settings/keys</a> with access to your group libraries.</p></div>
+                    <?php endif; ?>
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row"><label for="zotero_viz_api_key">Zotero API Key</label></th>
+                            <td>
+                                <input type="password" id="zotero_viz_api_key" name="zotero_viz_api_key" value="" autocomplete="new-password" class="regular-text" placeholder="<?php echo $has_api_key ? '••••••••••••••••' : ''; ?>" />
+                                <?php if ($has_api_key): ?>
+                                    <p class="description"><strong>API key is configured.</strong> Leave this field blank to keep the current key. The key is stored encrypted and is never shown again.</p>
+                                <?php else: ?>
+                                    <p class="description">Required for cache refresh. The key is used only on the server and is never sent to public pages.</p>
+                                <?php endif; ?>
+                                <p>
+                                    <label>
+                                        <input type="checkbox" name="zotero_viz_clear_api_key" value="1" />
+                                        Clear API key
+                                    </label>
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+
                     <h2>Zotero Collections</h2>
                     <p class="description">Enter a Zotero URL (e.g., https://www.zotero.org/groups/5872416/hl_standards/library) or manually specify the components.</p>
                     <table class="wp-list-table widefat fixed striped">
@@ -414,7 +586,11 @@ function zotero_viz_admin_page() {
                         — <span style="color:#b32d2e;">not writable. WordPress cannot save cache files here.</span>
                     <?php endif; ?>
                 </p>
+                <?php if (!$has_api_key): ?>
+                    <div class="notice notice-warning inline"><p>No Zotero API key is configured. Cache refresh will fail until you add one on the Settings tab.</p></div>
+                <?php endif; ?>
                 <form method="post" style="margin: 12px 0 16px;">
+                    <?php wp_nonce_field('zotero_viz_admin'); ?>
                     <input type="submit" name="zotero_viz_refresh_cache" class="button button-secondary" value="Refresh Cache Now" />
                 </form>
                 
@@ -871,6 +1047,14 @@ function zotero_viz_render_readme() {
 
 // Zotero API functions
 function zotero_viz_fetch_collection_items($group_id, $collection_key = null) {
+    $api_key = zotero_viz_get_api_key();
+    if ($api_key === '') {
+        return new WP_Error(
+            'zotero_viz_fetch',
+            'Zotero API key is required. Add one on the Settings tab.'
+        );
+    }
+
     $items = array();
     $start = 0;
     $limit = 100;
@@ -894,16 +1078,13 @@ function zotero_viz_fetch_collection_items($group_id, $collection_key = null) {
         $last_error = '';
         
         for ($attempt = 1; $attempt <= $max_retries; $attempt++) {
-            // Anonymous Zotero API limit is ~1 request/second
             if ($start > 0 || $attempt > 1) {
-                usleep(1100000);
+                usleep(200000);
             }
             
             $response = wp_remote_get($url, array(
                 'timeout' => 60,
-                'headers' => array(
-                    'Zotero-API-Version' => '3'
-                )
+                'headers' => zotero_viz_api_headers($api_key)
             ));
             
             if (is_wp_error($response)) {
@@ -917,9 +1098,15 @@ function zotero_viz_fetch_collection_items($group_id, $collection_key = null) {
                 sleep(3);
                 continue;
             }
+            if ($code == 401 || $code == 403) {
+                return new WP_Error(
+                    'zotero_viz_fetch',
+                    'Zotero API key is invalid or does not have access to this library (HTTP ' . intval($code) . ')'
+                );
+            }
             if ($code < 200 || $code >= 300) {
-                $body_preview = wp_remote_retrieve_body($response);
-                $last_error = 'Zotero API HTTP ' . $code . ': ' . substr(wp_strip_all_tags($body_preview), 0, 200);
+                $body_preview = zotero_viz_redact_api_error_body(wp_remote_retrieve_body($response), $api_key);
+                $last_error = 'Zotero API HTTP ' . $code . ': ' . $body_preview;
                 continue;
             }
             
