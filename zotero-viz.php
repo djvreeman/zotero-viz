@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Zotero Visualizations
  * Description: Display interactive world maps and bar charts from Zotero collections
- * Version: 1.0.13
+ * Version: 1.0.14
  * Author: Daniel J. Vreeman, PT, DPT, MS, FACMI, FIAHSI
  * License: GPL v2 or later
  */
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('ZOTERO_VIZ_VERSION', '1.0.13'); // Increment this to force asset/cache refresh
+define('ZOTERO_VIZ_VERSION', '1.0.14'); // Increment this to force asset/cache refresh
 define('ZOTERO_VIZ_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('ZOTERO_VIZ_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -529,8 +529,11 @@ function zotero_viz_admin_page() {
 
         <div id="zotero-viz-refresh-progress" class="zotero-viz-refresh-progress" hidden>
             <p class="zotero-viz-refresh-heading">
-                <span class="spinner is-active"></span>
-                <span id="zotero-viz-refresh-label">Preparing cache refresh…</span>
+                <span class="zotero-viz-refresh-heading-main">
+                    <span class="spinner is-active"></span>
+                    <span id="zotero-viz-refresh-label">Preparing cache refresh…</span>
+                </span>
+                <button type="button" class="button-link zotero-viz-refresh-dismiss" id="zotero-viz-refresh-dismiss" hidden>Dismiss</button>
             </p>
             <div class="zotero-viz-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="zotero-viz-progressbar">
                 <div class="zotero-viz-progress-bar" id="zotero-viz-progress-bar"></div>
