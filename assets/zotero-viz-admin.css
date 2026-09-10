@@ -1,0 +1,84 @@
+.zotero-viz-refresh-progress[hidden] {
+    display: none !important;
+}
+
+.zotero-viz-refresh-progress {
+    margin: 16px 0 20px;
+    padding: 14px 16px 12px;
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.zotero-viz-refresh-progress.is-complete {
+    border-left: 4px solid #00a32a;
+}
+
+.zotero-viz-refresh-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.zotero-viz-refresh-heading .spinner {
+    float: none;
+    margin: 0;
+}
+
+.zotero-viz-progress-track {
+    height: 18px;
+    background: #dcdcde;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.zotero-viz-progress-bar {
+    height: 100%;
+    width: 0;
+    background: #2271b1;
+    transition: width 0.25s ease;
+}
+
+.zotero-viz-refresh-count {
+    margin: 8px 0 10px;
+    color: #50575e;
+}
+
+.zotero-viz-refresh-libraries {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.zotero-viz-refresh-libraries li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-top: 1px solid #f0f0f1;
+}
+
+.zotero-viz-refresh-libraries li.running strong {
+    color: #1d2327;
+}
+
+.zotero-viz-refresh-state {
+    color: #646970;
+    text-align: right;
+}
+
+.zotero-viz-refresh-libraries li.success .zotero-viz-refresh-state {
+    color: #00a32a;
+}
+
+.zotero-viz-refresh-libraries li.error .zotero-viz-refresh-state {
+    color: #d63638;
+}
+
+.zotero-viz-refresh-libraries li.running .zotero-viz-refresh-state {
+    color: #2271b1;
+    font-weight: 600;
+}
